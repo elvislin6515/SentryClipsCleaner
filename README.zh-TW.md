@@ -8,7 +8,15 @@ Tesla USB / [teslausb](https://github.com/marcone/teslausb) 的哨兵資料夾�
 
 影片不會上傳。分析都在你這台電腦進行。
 
-## 取得程式
+![同一波哨兵裡，多餘的片段已被勾成將刪除](docs/screenshot.png)
+
+別人會用這些字來找：`SentryClips 滿了`、`SentryClips disk full`、`delete duplicate sentry clips`。
+
+## 下載
+
+Windows 請下載[最新版本](https://github.com/elvislin6515/SentryClipsCleaner/releases/latest)，解壓縮，安裝 [Node.js LTS](https://nodejs.org/)，再雙擊 `start.cmd`。瀏覽器會打開 `http://127.0.0.1:43147`。
+
+## 取得原始碼
 
 ```powershell
 git clone https://github.com/elvislin6515/SentryClipsCleaner.git

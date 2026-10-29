@@ -8,7 +8,15 @@ This tool reads those folder names in the browser, groups events that are close 
 
 Videos stay on your computer. Nothing is uploaded.
 
-## Run it
+![A dense sentry burst, with the extra clips checked for deletion](docs/screenshot.png)
+
+Search terms this is meant to match: `SentryClips disk full`, `delete duplicate sentry clips`, `teslausb too many sentry events`.
+
+## Download
+
+On Windows, download the [latest release](https://github.com/elvislin6515/SentryClipsCleaner/releases/latest), unzip it, install [Node.js LTS](https://nodejs.org/), and double-click `start.cmd`. The page opens at `http://127.0.0.1:43147`.
+
+## Run from source
 
 Install [Node.js LTS](https://nodejs.org/), then from this folder:
 
