@@ -1,3 +1,5 @@
+import type { Locale } from "../i18n/locale";
+
 export const CAMERA_ORDER = [
   "front",
   "back",
@@ -61,21 +63,56 @@ export function groupClipVideos(
     }));
 }
 
-export function cameraLabel(camera: CameraId): string {
-  switch (camera) {
-    case "front":
-      return "前方";
-    case "back":
-      return "後方";
-    case "left_repeater":
-      return "左方";
-    case "right_repeater":
-      return "右方";
-    case "left_pillar":
-      return "左 B 柱";
-    case "right_pillar":
-      return "右 B 柱";
+const CAMERA_LABELS: Record<Locale, Record<CameraId, string>> = {
+  en: {
+    front: "Front",
+    back: "Rear",
+    left_repeater: "Left",
+    right_repeater: "Right",
+    left_pillar: "Left pillar",
+    right_pillar: "Right pillar",
+  },
+  "zh-Hant": {
+    front: "前方",
+    back: "後方",
+    left_repeater: "左方",
+    right_repeater: "右方",
+    left_pillar: "左 B 柱",
+    right_pillar: "右 B 柱",
+  },
+};
+
+const REASON_LABELS: Record<
+  Locale,
+  {
+    object: string;
+    shake: string;
+    handle: string;
+    honk: string;
+    manual: string;
+    interaction: string;
   }
+> = {
+  en: {
+    object: "Object detected",
+    shake: "Vehicle shaken",
+    handle: "Door handle pulled",
+    honk: "Horn",
+    manual: "Saved manually",
+    interaction: "Manual action",
+  },
+  "zh-Hant": {
+    object: "偵測到物體",
+    shake: "車輛晃動",
+    handle: "拉動門把",
+    honk: "按喇叭",
+    manual: "手動儲存",
+    interaction: "手動操作",
+  },
+};
+
+export function cameraLabel(camera: CameraId, locale: Locale = "en"): string {
+  return CAMERA_LABELS[locale][camera];
 }
 
 export function segmentClock(segmentId: string): string {
@@ -90,7 +127,7 @@ export function segmentStartMs(segmentId: string): number | null {
   );
 }
 
-/** Tesla event.json 的 camera 編號。0 前方、3/4 左右、5/6 B 柱、7 後方。 */
+/** Tesla event.json camera index. 0 front, 3/4 repeaters, 5/6 pillars, 7 rear. */
 const CAMERA_BY_INDEX: Record<string, CameraId> = {
   "0": "front",
   "1": "front",
@@ -100,16 +137,6 @@ const CAMERA_BY_INDEX: Record<string, CameraId> = {
   "5": "left_pillar",
   "6": "right_pillar",
   "7": "back",
-};
-
-const REASON_LABELS: Record<string, string> = {
-  sentry_aware_object_detection: "偵測到物體",
-  sentry_aware_accel: "車輛晃動",
-  sentry_locked_handle_pulled: "拉動門把",
-  user_interaction_honk: "按喇叭",
-  user_interaction_dashcam_icon_tapped: "手動儲存",
-  user_interaction_dashcam_panel_save: "手動儲存",
-  user_interaction_dashcam_launcher_action_tapped: "手動儲存",
 };
 
 export type ClipEventMeta = {
@@ -135,11 +162,23 @@ export function eventCameraId(raw: unknown): CameraId | null {
   return CAMERA_BY_INDEX[text] ?? null;
 }
 
-export function eventReasonLabel(reason: string | null): string {
+export function eventReasonLabel(reason: string | null, locale: Locale = "en"): string {
   if (!reason) return "";
-  if (REASON_LABELS[reason]) return REASON_LABELS[reason];
-  if (reason.startsWith("sentry_aware_accel")) return "車輛晃動";
-  if (reason.startsWith("user_interaction")) return "手動操作";
+  const copy = REASON_LABELS[locale];
+  if (reason === "sentry_aware_object_detection") return copy.object;
+  if (reason === "sentry_aware_accel" || reason.startsWith("sentry_aware_accel")) {
+    return copy.shake;
+  }
+  if (reason === "sentry_locked_handle_pulled") return copy.handle;
+  if (reason === "user_interaction_honk") return copy.honk;
+  if (
+    reason === "user_interaction_dashcam_icon_tapped" ||
+    reason === "user_interaction_dashcam_panel_save" ||
+    reason === "user_interaction_dashcam_launcher_action_tapped"
+  ) {
+    return copy.manual;
+  }
+  if (reason.startsWith("user_interaction")) return copy.interaction;
   return reason;
 }
 
@@ -269,7 +308,7 @@ const SAME_SIDE: Record<CameraId, readonly CameraId[]> = {
   right_pillar: ["right_repeater", "right_pillar"],
 };
 
-/** 預設開觸發的那一側（左右各兩支）。沒有觸發紀錄時改開前方。all 才把這一分鐘有的鏡頭都打開。 */
+/** Open the triggered side by default (two cameras). Without a trigger, open the front camera. `all` opens every camera in that minute. */
 export function camerasToOpen(
   available: readonly CameraId[],
   trigger: CameraId | null,

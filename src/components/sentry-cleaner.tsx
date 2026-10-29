@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import { ClipViewer } from "@/components/clip-viewer";
+import { useI18n } from "@/i18n/provider";
+import { explain } from "@/i18n/messages";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,7 +75,7 @@ import {
   type ClipLocation,
   type KeepPolicy,
 } from "@/lib/clips";
-import { createDemoClips, DEMO_FOLDER_LABEL } from "@/lib/demo-data";
+import { createDemoClips } from "@/lib/demo-data";
 import {
   buildFolderList,
   buildPowerShellScript,
@@ -90,6 +92,7 @@ import {
   pickClipDirectory,
   type DirectoryHandleLike,
 } from "@/lib/fs-access";
+import { CodedError } from "@/lib/coded-error";
 import { readLastLocalPath, writeLastLocalPath } from "@/lib/last-folder";
 
 const KIND_OPTIONS: Array<ClipKind | "all"> = [
@@ -101,6 +104,7 @@ const KIND_OPTIONS: Array<ClipKind | "all"> = [
 ];
 
 export function SentryCleaner() {
+  const { locale, setLocale, m } = useI18n();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [clips, setClips] = useState<Clip[]>([]);
   const [label, setLabel] = useState("");
@@ -205,9 +209,7 @@ export function SentryCleaner() {
       for (const name of names) next.add(name);
       return next;
     });
-    setNotice(
-      `已把 ${names.length} 筆指定地點的哨兵加入勾選。孤立事件也會被勾，確認後再刪。`,
-    );
+    setNotice(m.placesChecked(names.length));
   }
 
   function applySuggestion(nextClips = visibleClips) {
@@ -272,22 +274,20 @@ export function SentryCleaner() {
     setError(null);
     setNotice(null);
     try {
-      setScan("正在開啟資料夾選擇器…");
+      setScan(m.openingPicker);
       const directory = await pickClipDirectory();
-      setScan(`正在掃描 ${directory.name}…`);
+      setScan(m.scanningName(directory.name));
       const library = await loadLibraryFromDirectory(directory, (progress) => {
-        setScan(`正在讀取資料夾 ${progress.current} / ${progress.total}`);
+        setScan(m.readingFolder(progress.current, progress.total));
       });
       if (library.clips.length === 0) {
-        setError(
-          `在「${library.label}」裡找不到 Tesla 時間戳資料夾（例如 2026-08-20_22-14-02）。請選 SentryClips，或上一層的 TeslausbCamModelX。`,
-        );
+        setError(m.noTimestamp(library.label));
         setClips([]);
         setLabel("");
         return;
       }
       let nextClips = library.clips;
-      setScan("正在對應本機路徑…");
+      setScan(m.matchingPath);
       const sampleNames = nextClips.map((clip) => clip.name);
       const clipRoot = await resolvePickedClipRoot(
         directory.name,
@@ -305,7 +305,7 @@ export function SentryCleaner() {
       const missingSizes = nextClips.some((clip) => clip.size <= 0);
       const sizePath = clipRoot ?? pathIfFolderMatches(localPath, directory.name);
       if (missingSizes && sizePath) {
-        setScan("正在用本機路徑補算大小…");
+        setScan(m.fillingSizes);
         const sized = await fetchLocalScan(sizePath);
         if (sized?.folders.length) {
           nextClips = mergeFolderSizes(nextClips, sized.folders);
@@ -319,26 +319,21 @@ export function SentryCleaner() {
         library.clips.length === 1 &&
         library.clips[0].name === library.label
       ) {
-        setNotice(
-          "你選到的是單一事件資料夾。若要分析整批哨兵，請改選上一層的 SentryClips。",
-        );
+        setNotice(m.singleEvent);
       } else {
         const total = nextClips.reduce((sum, clip) => sum + clip.size, 0);
         const located = nextClips.filter((clip) => clip.location).length;
-        const pathNote = clipRoot
-          ? `刪除腳本路徑已改成 ${clipRoot}。`
-          : "沒有對到本機路徑，刪除腳本可能會指到舊資料夾。請改按「掃描本機路徑」。";
-        const locationNote =
-          located > 0 ? `其中 ${located} 筆有路名或座標。` : "";
+        const pathNote = clipRoot ? m.pathUpdated(clipRoot) : m.pathMissing;
+        const locationNote = located > 0 ? m.locatedCount(located) : "";
         setNotice(
           total > 0
-            ? `已讀取 ${nextClips.length} 個資料夾，合計 ${formatBytes(total)}。${locationNote}${pathNote}`
-            : `已讀取 ${nextClips.length} 個資料夾名稱。${locationNote}${pathNote || "若要看大小，請改用「掃描本機路徑」。"}`,
+            ? m.readWithSize(nextClips.length, formatBytes(total, locale), locationNote, pathNote)
+            : m.readNamesOnly(nextClips.length, locationNote, pathNote),
         );
       }
     } catch (err) {
       if (isAbort(err)) return;
-      setError(err instanceof Error ? err.message : "無法讀取資料夾");
+      setError(explain(err, m, m.errors.read_folder));
     } finally {
       setScan(null);
     }
@@ -352,38 +347,30 @@ export function SentryCleaner() {
     if (!files || files.length === 0) return;
     const library = loadLibraryFromFileList(Array.from(files));
     if (library.clips.length === 0) {
-      setError(
-        "選到的內容裡沒有 Tesla 時間戳資料夾。請直接選 SentryClips，或含有 2026-08-20_22-14-02 這種名稱的資料夾。",
-      );
+      setError(m.browseNoTimestamp);
       return;
     }
     replaceLibrary(library.clips, library.label, { canDelete: false });
-    setNotice(
-      "這個選法只能分析，不能直接刪除。確認清單後，請下載 PowerShell 腳本在電腦上清理。",
-    );
+    setNotice(m.browseAnalyzeOnly);
   }
 
   function handleDemo() {
-    replaceLibrary(createDemoClips(), DEMO_FOLDER_LABEL, { demo: true });
-    setNotice(
-      "這是一週的示範哨兵紀錄：夜間行人、凌晨樹影、賣場停車都有連續觸發。正式清理請改選你的 SentryClips。",
-    );
+    replaceLibrary(createDemoClips(), m.demoLabel, { demo: true });
+    setNotice(m.demoNotice);
   }
 
   async function handleLocalScan() {
     setError(null);
     setNotice(null);
-    setScan("正在掃描本機資料夾並計算大小…");
+    setScan(m.scanningLocal);
     try {
       const data = await fetchLocalScan(localPath);
       if (!data) {
-        throw new Error("無法掃描這個路徑");
+        throw new Error("scan_failed");
       }
       const next = clipsFromNamedFolders(data.folders);
       if (next.length === 0) {
-        setError(
-          `在「${data.label ?? localPath}」裡找不到 Tesla 時間戳資料夾。請填 SentryClips，或上一層的 TeslausbCamModelX。`,
-        );
+        setError(m.noTimestamp(data.label ?? localPath));
         setClips([]);
         setLabel("");
         return;
@@ -400,15 +387,15 @@ export function SentryCleaner() {
       const total = next.reduce((sum, clip) => sum + clip.size, 0);
       const located = next.filter((clip) => clip.location).length;
       const locationNote =
-        located > 0 ? `其中 ${located} 筆有路名或座標。` : "這些資料夾沒有 event.json，所以沒有位置。";
-      const pathNote = clipRoot ? `刪除腳本路徑已改成 ${clipRoot}。` : "";
+        located > 0 ? m.locatedCount(located) : m.noLocationFiles;
+      const pathNote = clipRoot ? m.pathUpdated(clipRoot) : "";
       setNotice(
         total > 0
-          ? `已從本機路徑讀取 ${next.length} 個資料夾，合計 ${formatBytes(total)}。${locationNote}${pathNote}沒有下載任何影片。`
-          : `已從本機路徑讀取 ${next.length} 個資料夾名稱。${locationNote}${pathNote}確認清單後請下載 PowerShell 腳本刪除。`,
+          ? m.localWithSize(next.length, formatBytes(total, locale), locationNote, pathNote)
+          : m.localNamesOnly(next.length, locationNote, pathNote),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "無法掃描本機路徑");
+      setError(explain(err, m, m.errors.scan_local));
     } finally {
       setScan(null);
     }
@@ -438,7 +425,7 @@ export function SentryCleaner() {
       setScriptCopied(true);
     } catch {
       setScriptCopied(false);
-      setNotice("無法寫入剪貼簿，請手動複製對話框裡的命令。");
+      setNotice(m.clipboardFailed);
     }
   }
 
@@ -449,7 +436,7 @@ export function SentryCleaner() {
   function downloadDeleteScript() {
     downloadTextFile(
       scriptFileName,
-      buildPowerShellScript(selectedNames, scriptRoot),
+      buildPowerShellScript(selectedNames, scriptRoot, locale),
     );
     void copyCommand(runCommand);
   }
@@ -457,14 +444,14 @@ export function SentryCleaner() {
   function handlePaste() {
     const next = parsePastedNames(pasteText);
     if (next.length === 0) {
-      setError("貼上的文字裡找不到時間戳資料夾名稱。");
+      setError(m.pasteEmpty);
       return;
     }
-    replaceLibrary(next, `貼上的 ${next.length} 個資料夾名稱`, {
+    replaceLibrary(next, m.pastedLabel(next.length), {
       canDelete: false,
     });
     setPasteOpen(false);
-    setNotice("已從名稱清單分析。這種方式沒有檔案大小，也無法直接刪除。");
+    setNotice(m.pastedNotice);
   }
 
   function toggleName(name: string, checked: boolean) {
@@ -492,8 +479,8 @@ export function SentryCleaner() {
         setDeleteOpen(false);
         setNotice(
           isDemo
-            ? `示範模式已從清單拿掉 ${names.length} 個資料夾，實際硬碟沒有更動。`
-            : "這個來源不能直接刪除。請改下載 PowerShell 腳本。",
+            ? m.demoRemoved(names.length)
+            : m.useScript,
         );
         return;
       }
@@ -506,13 +493,17 @@ export function SentryCleaner() {
       setDeleteOpen(false);
       if (result.failed.length > 0) {
         setError(
-          `已刪 ${result.deleted.length} 個，但有 ${result.failed.length} 個失敗：${result.failed
-            .slice(0, 3)
-            .map((item) => `${item.name}（${item.error}）`)
-            .join("、")}`,
+          m.deletePartial(
+            result.deleted.length,
+            result.failed.length,
+            result.failed
+              .slice(0, 3)
+              .map((item) => `${item.name} (${explain(item.error, m, item.error)})`)
+              .join(", "),
+          ),
         );
       } else {
-        setNotice(`已從磁碟刪除 ${result.deleted.length} 個資料夾。`);
+        setNotice(m.deletedDisk(result.deleted.length));
       }
     } finally {
       setDeleting(false);
@@ -530,34 +521,50 @@ export function SentryCleaner() {
           <div className="flex items-center gap-2 text-sentry">
             <Camera className="size-5" />
             <p className="text-xs font-medium tracking-[0.18em] uppercase">
-              Tesla USB · Model X
+              {m.brand}
             </p>
           </div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            SentryClips 密集事件清理
+            {m.title}
           </h1>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-            哨兵模式常被行人、樹影或風連續觸發。選取
-            <span className="text-foreground"> SentryClips </span>
-            後，工具會依資料夾名稱的時間戳找出間隔太近的事件，讓你留下代表片段、清掉太密的那些。
+            {m.intro}
           </p>
         </div>
-        {label ? (
-          <Badge variant="secondary" className="w-fit max-w-full truncate">
-            {label}
-          </Badge>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-border p-0.5" role="group" aria-label={m.lang.label}>
+            <Button
+              size="sm"
+              variant={locale === "en" ? "secondary" : "ghost"}
+              onClick={() => setLocale("en")}
+            >
+              {m.lang.en}
+            </Button>
+            <Button
+              size="sm"
+              variant={locale === "zh-Hant" ? "secondary" : "ghost"}
+              onClick={() => setLocale("zh-Hant")}
+            >
+              {m.lang.zh}
+            </Button>
+          </div>
+          {label ? (
+            <Badge variant="secondary" className="w-fit max-w-full truncate">
+              {label}
+            </Badge>
+          ) : null}
+        </div>
       </header>
 
       <Card>
         <CardHeader>
-          <CardTitle>讀取資料夾</CardTitle>
+          <CardTitle>{m.readTitle}</CardTitle>
           <CardDescription>
-            分析只讀資料夾名稱，不會下載 OneDrive 裡的影片。請選
+            {m.readBodyBefore}
             <code className="mx-1 rounded bg-muted px-1.5 py-0.5 text-foreground">
-              TeslausbCamModelX\SentryClips
+              TeslaCam\SentryClips
             </code>
-            ，或直接掃描下面的本機路徑。
+            {m.readBodyMid}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -574,7 +581,7 @@ export function SentryCleaner() {
               ) : (
                 <FolderOpen />
               )}
-              {scan ?? "選擇 SentryClips 資料夾"}
+              {scan ?? m.pickFolder}
             </Button>
             {hasDirectoryPicker ? (
               <Button
@@ -583,7 +590,7 @@ export function SentryCleaner() {
                 onClick={handleBrowseFallback}
                 disabled={Boolean(scan)}
               >
-                改用瀏覽資料夾
+                {m.browseFallback}
               </Button>
             ) : null}
             <Button
@@ -592,7 +599,7 @@ export function SentryCleaner() {
               onClick={() => setPasteOpen(true)}
               disabled={Boolean(scan)}
             >
-              貼上資料夾名稱
+              {m.pasteNames}
             </Button>
             <Button
               size="lg"
@@ -601,7 +608,7 @@ export function SentryCleaner() {
               disabled={Boolean(scan)}
             >
               {scan ? <LoaderCircle className="animate-spin" /> : <HardDrive />}
-              掃描本機路徑
+              {m.scanLocal}
             </Button>
             <Button
               size="lg"
@@ -609,14 +616,15 @@ export function SentryCleaner() {
               onClick={handleDemo}
               disabled={Boolean(scan)}
             >
-              先用示範資料看看
+              {m.tryDemo}
             </Button>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="local-path">本機 SentryClips 路徑</Label>
+            <Label htmlFor="local-path">{m.localPath}</Label>
             <Input
               id="local-path"
               value={localPath}
+              placeholder={m.pathPlaceholder}
               onChange={(event) => setLocalPath(event.target.value)}
               onBlur={() => writeLastLocalPath(localPath)}
               className="font-mono text-xs"
@@ -635,8 +643,7 @@ export function SentryCleaner() {
             {...{ webkitdirectory: "", directory: "" }}
           />
           <p className="text-xs leading-5 text-muted-foreground">
-            分析時不會上傳，也不會把整批影片抓下來。每一筆可按「觀看」，只讀那一個資料夾。雲端檔第一次播放會等 OneDrive 下載。SavedClips
-            預設不會列入，避免誤刪你手動保存的片段。
+            {m.privacy}
           </p>
         </CardContent>
       </Card>
@@ -644,7 +651,7 @@ export function SentryCleaner() {
       {error ? (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>讀取或刪除時發生問題</AlertTitle>
+          <AlertTitle>{m.problemTitle}</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -652,7 +659,7 @@ export function SentryCleaner() {
       {notice ? (
         <Alert>
           <Check />
-          <AlertTitle>目前狀態</AlertTitle>
+          <AlertTitle>{m.statusTitle}</AlertTitle>
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       ) : null}
@@ -663,52 +670,50 @@ export function SentryCleaner() {
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="可見事件"
+              label={m.visibleEvents}
               value={String(stats.total)}
               hint={
                 locationKeys.size > 0
-                  ? `已過濾 ${locationKeys.size} 個地點`
+                  ? m.filteredPlaces(locationKeys.size)
                   : stats.knownBytes
-                    ? `合計 ${formatBytes(stats.totalBytes)}`
-                    : "依來源篩選後"
+                    ? m.totalSize(formatBytes(stats.totalBytes, locale))
+                    : m.filteredBySource
               }
             />
             <StatCard
-              label="密集群組"
+              label={m.denseGroups}
               value={String(denseClusters.length)}
-              hint={`間隔 ≤ ${formatGapMinutes(gapSeconds)}`}
+              hint={m.gapAtMost(formatGapMinutes(gapSeconds, locale))}
               tone="warn"
             />
             <StatCard
-              label="建議刪除"
+              label={m.suggestedDelete}
               value={String(stats.selectedCount)}
               hint={
                 stats.knownBytes
-                  ? `可清出 ${formatBytes(stats.selectedBytes)}`
-                  : "尚未讀到檔案大小"
+                  ? m.canFree(formatBytes(stats.selectedBytes, locale))
+                  : m.sizeUnread
               }
               tone="danger"
             />
             <StatCard
-              label="孤立事件"
+              label={m.isolated}
               value={String(isolatedCount)}
-              hint="間隔夠遠，預設保留"
+              hint={m.isolatedHint}
             />
           </section>
 
           <Card>
             <CardHeader>
-              <CardTitle>判斷條件</CardTitle>
-              <CardDescription>
-                連續兩筆間隔小於閾值會收成同一群。群組達到最少筆數後，依保留策略勾選多餘的資料夾。
-              </CardDescription>
+              <CardTitle>{m.rulesTitle}</CardTitle>
+              <CardDescription>{m.rulesBody}</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-5 lg:grid-cols-2">
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="gap">視為接近的間隔</Label>
+                  <Label htmlFor="gap">{m.gapLabel}</Label>
                   <span className="font-mono text-sm">
-                    {formatGapMinutes(gapSeconds)}
+                    {formatGapMinutes(gapSeconds, locale)}
                   </span>
                 </div>
                 <Slider
@@ -723,11 +728,11 @@ export function SentryCleaner() {
                   }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Tesla 哨兵常 30–90 秒再觸發一次。3 分鐘通常能抓到「同一波」干擾。
+                  {m.gapHint}
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="最少幾筆才算太密">
+                <Field label={m.minCount}>
                   <Select
                     value={String(minClusterSize)}
                     onValueChange={(value) =>
@@ -740,13 +745,13 @@ export function SentryCleaner() {
                     <SelectContent>
                       {[2, 3, 4, 5].map((value) => (
                         <SelectItem key={value} value={String(value)}>
-                          {value} 筆以上
+                          {m.minCountValue(value)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="每個密集群組保留">
+                <Field label={m.keepLabel}>
                   <Select
                     value={keepPolicy}
                     onValueChange={(value) =>
@@ -757,17 +762,17 @@ export function SentryCleaner() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="first">第一筆</SelectItem>
-                      <SelectItem value="last">最後一筆</SelectItem>
-                      <SelectItem value="middle">中間那筆</SelectItem>
+                      <SelectItem value="first">{m.keepFirst}</SelectItem>
+                      <SelectItem value="last">{m.keepLast}</SelectItem>
+                      <SelectItem value="middle">{m.keepMiddle}</SelectItem>
                       <SelectItem value="spaced">
-                        每隔 {formatGapMinutes(gapSeconds)} 留一筆
+                        {m.keepEvery(formatGapMinutes(gapSeconds, locale))}
                       </SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
                 {kindsPresent.size > 1 ? (
-                  <Field label="資料夾來源">
+                  <Field label={m.sourceLabel}>
                     <Select
                       value={kindFilter}
                       onValueChange={(value) =>
@@ -782,7 +787,7 @@ export function SentryCleaner() {
                           (kind) => kind === "all" || kindsPresent.has(kind),
                         ).map((kind) => (
                           <SelectItem key={kind} value={kind}>
-                            {kind === "all" ? "全部來源" : clipKindLabel(kind)}
+                            {kind === "all" ? m.allSources : clipKindLabel(kind, locale)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -795,7 +800,7 @@ export function SentryCleaner() {
                     className="w-full"
                     onClick={() => applySuggestion()}
                   >
-                    依目前條件重算勾選
+                    {m.reapply}
                   </Button>
                 </div>
               </div>
@@ -805,10 +810,8 @@ export function SentryCleaner() {
           {placeStats.length > 0 ? (
             <Card>
               <CardHeader>
-                <CardTitle>常出現的地點</CardTitle>
-                <CardDescription>
-                  依哨兵資料夾裡的路名統計。選住家或公司後，下面清單只會留下那些地點；再按「勾選這些地點全部」就能一次清掉。
-                </CardDescription>
+                <CardTitle>{m.placesTitle}</CardTitle>
+                <CardDescription>{m.placesBody}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-2">
@@ -819,18 +822,17 @@ export function SentryCleaner() {
                         key={place.key}
                         size="sm"
                         variant={active ? "default" : "outline"}
-                        title={
-                          place.bytes > 0
-                            ? `${place.count} 筆 · ${formatBytes(place.bytes)}`
-                            : `${place.count} 筆`
-                        }
+                        title={m.placeCount(
+                          place.count,
+                          place.bytes > 0 ? formatBytes(place.bytes, locale) : "",
+                        )}
                         onClick={() => toggleLocation(place.key)}
                       >
                         <MapPin />
                         {place.label}
                         <span className="font-mono text-[11px] opacity-80">
                           {place.count}
-                          {place.bytes > 0 ? ` · ${formatBytes(place.bytes)}` : ""}
+                          {place.bytes > 0 ? ` · ${formatBytes(place.bytes, locale)}` : ""}
                         </span>
                       </Button>
                     );
@@ -842,14 +844,14 @@ export function SentryCleaner() {
                     disabled={visibleClips.length === 0}
                     onClick={selectVisibleClips}
                   >
-                    全選
+                    {m.selectAllPlaces}
                   </Button>
                   <Button
                     variant="ghost"
                     disabled={selected.size === 0}
                     onClick={clearSelectedClips}
                   >
-                    全部取消
+                    {m.clearPlaces}
                   </Button>
                   {locationKeys.size > 0 ? (
                     <>
@@ -857,13 +859,13 @@ export function SentryCleaner() {
                         variant="outline"
                         onClick={selectFilteredLocations}
                       >
-                        勾選這些地點全部
+                        {m.checkThesePlaces}
                       </Button>
                       <Button
                         variant="ghost"
                         onClick={() => setLocationKeys(new Set())}
                       >
-                        取消地點過濾
+                        {m.clearPlaceFilter}
                       </Button>
                     </>
                   ) : null}
@@ -873,8 +875,8 @@ export function SentryCleaner() {
                       onClick={() => setShowAllLocations((value) => !value)}
                     >
                       {showAllLocations
-                        ? "只顯示最常出現的"
-                        : `顯示全部 ${placeStats.length} 個地點`}
+                        ? m.topPlacesOnly
+                        : m.showAllPlaces(placeStats.length)}
                     </Button>
                   ) : null}
                 </div>
@@ -885,10 +887,8 @@ export function SentryCleaner() {
           {kindFilter === "SavedClips" ? (
             <Alert variant="destructive">
               <ShieldAlert />
-              <AlertTitle>這是 SavedClips</AlertTitle>
-              <AlertDescription>
-                這些通常是你手動保存的片段。請再確認一次，不要把重要事件清掉。
-              </AlertDescription>
+              <AlertTitle>{m.savedTitle}</AlertTitle>
+              <AlertDescription>{m.savedBody}</AlertDescription>
             </Alert>
           ) : null}
 
@@ -897,17 +897,17 @@ export function SentryCleaner() {
           <Tabs defaultValue="clusters">
             <TabsList className="w-full sm:w-auto">
               <TabsTrigger value="clusters">
-                密集群組（{denseClusters.length}）
+                {m.tabDense(denseClusters.length)}
               </TabsTrigger>
-              <TabsTrigger value="all">全部時間軸（{visibleClips.length}）</TabsTrigger>
+              <TabsTrigger value="all">{m.tabAll(visibleClips.length)}</TabsTrigger>
               <TabsTrigger value="selected">
-                將刪除（{stats.selectedCount}）
+                {m.tabDelete(stats.selectedCount)}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="clusters" className="space-y-3 pt-3 pb-28">
               {denseClusters.length === 0 ? (
                 <p className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-                  以目前間隔來看，沒有太密集的群組。可把閾值調大，或把「最少筆數」降到 2。
+                  {m.noDense}
                 </p>
               ) : (
                 denseClusters.map((cluster, index) => (
@@ -917,7 +917,7 @@ export function SentryCleaner() {
                     names={cluster.clips.map((clip) => clip.name)}
                     clips={cluster.clips}
                     selected={selected}
-                    spanLabel={formatDuration(cluster.spanMs)}
+                    spanLabel={formatDuration(cluster.spanMs, locale)}
                     onToggle={toggleName}
                     onToggleCluster={keepCluster}
                     onWatch={setWatching}
@@ -938,7 +938,7 @@ export function SentryCleaner() {
             <TabsContent value="selected" className="pt-3 pb-28">
               {stats.selectedCount === 0 ? (
                 <p className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-                  還沒有勾選要刪的資料夾。
+                  {m.noneChecked}
                 </p>
               ) : (
                 <ClipTable
@@ -954,12 +954,13 @@ export function SentryCleaner() {
 
           <div className="pointer-events-none sticky bottom-3 z-20 flex flex-col gap-2 rounded-2xl border bg-background p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
-              已勾選 <span className="text-foreground">{stats.selectedCount}</span>{" "}
-              個
+              {m.checkedLead}{" "}
+              <span className="text-foreground">{stats.selectedCount}</span>{" "}
+              {m.checkedMid}
               {stats.knownBytes
-                ? `，可清出 ${formatBytes(stats.selectedBytes)}`
+                ? m.checkedSize(formatBytes(stats.selectedBytes, locale))
                 : ""}
-              。孤立事件不會被自動勾選。
+              {m.checkedTail}
             </p>
             <div className="pointer-events-auto flex flex-col gap-2 sm:flex-row">
               <Button
@@ -967,14 +968,14 @@ export function SentryCleaner() {
                 disabled={visibleClips.length === 0}
                 onClick={selectVisibleClips}
               >
-                全選
+                {m.selectVisible}
               </Button>
               <Button
                 variant="ghost"
                 disabled={selected.size === 0}
                 onClick={clearSelectedClips}
               >
-                全部取消
+                {m.clearChecks}
               </Button>
               <Button
                 variant="outline"
@@ -982,7 +983,7 @@ export function SentryCleaner() {
                 onClick={() => void openScriptDialog()}
               >
                 <Download />
-                下載刪除腳本
+                {m.downloadScript}
               </Button>
               <Button
                 variant="destructive"
@@ -990,7 +991,7 @@ export function SentryCleaner() {
                 onClick={() => setDeleteOpen(true)}
               >
                 <Trash2 />
-                {isDemo ? "從示範清單移除" : canDelete ? "刪除勾選的資料夾" : "無法直接刪除"}
+                {isDemo ? m.removeDemo : canDelete ? m.deleteChecked : m.cannotDelete}
               </Button>
             </div>
           </div>
@@ -1000,13 +1001,12 @@ export function SentryCleaner() {
       <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>貼上資料夾名稱</DialogTitle>
+            <DialogTitle>{m.pasteTitle}</DialogTitle>
             <DialogDescription>
-              可貼 Windows 的
+              {m.pasteBodyBefore}
               <code className="mx-1">dir</code>
-              結果，或一行一個
+              {m.pasteBodyAfter}
               <code className="mx-1">2026-08-20_22-14-02</code>
-              。
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -1017,9 +1017,9 @@ export function SentryCleaner() {
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setPasteOpen(false)}>
-              取消
+              {m.cancel}
             </Button>
-            <Button onClick={handlePaste}>開始分析</Button>
+            <Button onClick={handlePaste}>{m.analyze}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1033,13 +1033,11 @@ export function SentryCleaner() {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>下載 PowerShell 刪除腳本</DialogTitle>
-            <DialogDescription>
-              腳本只會刪下面清單裡的子資料夾。下載後 Windows 會擋未簽章的 .ps1，請用下面這行命令執行。
-            </DialogDescription>
+            <DialogTitle>{m.scriptTitle}</DialogTitle>
+            <DialogDescription>{m.scriptBody}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="root">這次要刪除的 SentryClips 路徑</Label>
+            <Label htmlFor="root">{m.scriptPath}</Label>
             <Input
               id="root"
               value={scriptRoot}
@@ -1048,26 +1046,24 @@ export function SentryCleaner() {
             />
           </div>
           <p className="max-h-32 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs">
-            {selectedNames.slice(0, 12).join("\n") || "（沒有勾選）"}
-            {selectedNames.length > 12
-              ? `\n…還有 ${selectedNames.length - 12} 個`
-              : ""}
+            {selectedNames.slice(0, 12).join("\n") || m.noneCheckedList}
+            {selectedNames.length > 12 ? m.moreNames(selectedNames.length - 12) : ""}
           </p>
           <div className="space-y-2 rounded-lg border p-3 text-sm">
-            <p className="font-medium">下載後這樣執行</p>
+            <p className="font-medium">{m.afterDownload}</p>
             <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-              <li>按「下載 .ps1」，命令會同時複製到剪貼簿。</li>
-              <li>打開 PowerShell，不用先切到下載資料夾。</li>
-              <li>貼上後按 Enter。腳本會立刻刪除清單裡的資料夾。</li>
+              <li>{m.stepDownload}</li>
+              <li>{m.stepOpen}</li>
+              <li>{m.stepPaste}</li>
             </ol>
             <p className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
               {runCommand}
             </p>
             <p className="text-xs text-muted-foreground">
-              檔名是 {scriptFileName}，預設在「下載」資料夾。時間戳讓這次的檔不會蓋掉以前下載的腳本。若瀏覽器存到別的地方，把命令裡的 Downloads 改成實際路徑。
+              {m.scriptFileNote(scriptFileName)}
             </p>
             {scriptCopied ? (
-              <p className="text-xs text-foreground">命令已放到剪貼簿，到 PowerShell 貼上即可。</p>
+              <p className="text-xs text-foreground">{m.copied}</p>
             ) : null}
           </div>
           <DialogFooter>
@@ -1075,7 +1071,7 @@ export function SentryCleaner() {
               variant="ghost"
               onClick={() => copyRunCommand()}
             >
-              再複製命令
+              {m.copyAgain}
             </Button>
             <Button
               variant="outline"
@@ -1086,10 +1082,10 @@ export function SentryCleaner() {
                 )
               }
             >
-              只下載清單
+              {m.downloadList}
             </Button>
             <Button onClick={() => downloadDeleteScript()}>
-              下載 .ps1
+              {m.downloadPs1}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1099,14 +1095,14 @@ export function SentryCleaner() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {isDemo ? "從示範清單移除這些資料夾？" : "確定刪除這些資料夾？"}
+              {isDemo ? m.confirmDemo : m.confirmReal}
             </DialogTitle>
             <DialogDescription>
               {isDemo
-                ? "示範模式只改畫面上的清單，不會動到你的 OneDrive。"
+                ? m.confirmDemoBody
                 : canDelete
-                  ? "這個動作無法復原。被勾選的哨兵資料夾會從磁碟移除。"
-                  : "目前這個來源不能由瀏覽器直接刪除，請改下載腳本。"}
+                  ? m.confirmRealBody
+                  : m.confirmBlocked}
             </DialogDescription>
           </DialogHeader>
           <p className="max-h-40 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs">
@@ -1114,7 +1110,7 @@ export function SentryCleaner() {
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              先不要
+              {m.notYet}
             </Button>
             <Button
               variant="destructive"
@@ -1122,7 +1118,7 @@ export function SentryCleaner() {
               onClick={confirmDelete}
             >
               {deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
-              {isDemo ? "移除示範項目" : `刪除 ${selectedNames.length} 個資料夾`}
+              {isDemo ? m.removeDemoItems : m.deleteCount(selectedNames.length)}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1187,18 +1183,17 @@ function StatCard({
 }
 
 function EmptyState({ onDemo }: { onDemo: () => void }) {
+  const { m } = useI18n();
   return (
     <Card className="border-dashed">
       <CardContent className="flex flex-col items-center gap-3 px-6 py-14 text-center">
         <FolderOpen className="size-8 text-muted-foreground" />
         <div className="space-y-1">
-          <p className="font-medium">還沒有可分析的哨兵資料夾</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            選本機的 SentryClips，或先載入示範資料，看夜間連續觸發會長什麼樣子。
-          </p>
+          <p className="font-medium">{m.emptyTitle}</p>
+          <p className="max-w-md text-sm text-muted-foreground">{m.emptyBody}</p>
         </div>
         <Button variant="secondary" onClick={onDemo}>
-          載入示範的一週紀錄
+          {m.loadDemo}
         </Button>
       </CardContent>
     </Card>
@@ -1214,6 +1209,7 @@ function Timeline({
   selected: Set<string>;
   gapSeconds: number;
 }) {
+  const { locale, m } = useI18n();
   if (clips.length === 0) return null;
   const start = clips[0].timestamp.getTime();
   const end = clips[clips.length - 1].timestamp.getTime();
@@ -1222,10 +1218,8 @@ function Timeline({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>時間分布</CardTitle>
-        <CardDescription>
-          紅點是勾選要刪的；灰點會保留。越擠的區段代表觸發越密。
-        </CardDescription>
+        <CardTitle>{m.timelineTitle}</CardTitle>
+        <CardDescription>{m.timelineBody}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="relative h-12 overflow-hidden rounded-lg bg-muted">
@@ -1239,7 +1233,7 @@ function Timeline({
             return (
               <span
                 key={clip.id}
-                title={`${clip.name} · ${formatDateTime(clip.timestamp)}${
+                title={`${clip.name} · ${formatDateTime(clip.timestamp, locale)}${
                   formatClipLocation(clip.location)
                     ? ` · ${formatClipLocation(clip.location)}`
                     : ""
@@ -1257,8 +1251,8 @@ function Timeline({
           })}
         </div>
         <div className="mt-2 flex justify-between font-mono text-[11px] text-muted-foreground">
-          <span>{formatDateTime(clips[0].timestamp)}</span>
-          <span>{formatDateTime(clips[clips.length - 1].timestamp)}</span>
+          <span>{formatDateTime(clips[0].timestamp, locale)}</span>
+          <span>{formatDateTime(clips[clips.length - 1].timestamp, locale)}</span>
         </div>
       </CardContent>
     </Card>
@@ -1286,6 +1280,7 @@ function ClusterCard({
   onWatch: (clip: Clip) => void;
   thumbRoot: string;
 }) {
+  const { locale, m } = useI18n();
   const selectedInCluster = names.filter((name) => selected.has(name)).length;
   const bytes = clips.reduce((sum, clip) => sum + clip.size, 0);
   const keepCount = names.length - selectedInCluster;
@@ -1295,16 +1290,16 @@ function ClusterCard({
       <CardHeader className="sticky top-0 z-30 border-b bg-card">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle>
-              群組 {index} · {clips.length} 筆 · 橫跨 {spanLabel}
-            </CardTitle>
+            <CardTitle>{m.groupMeta(index, clips.length, spanLabel)}</CardTitle>
             <CardDescription>
-              {formatDateTime(clips[0].timestamp)} 到{" "}
-              {formatClock(clips[clips.length - 1].timestamp)}
-              {sharedLocationLabel(clips)
-                ? ` · ${sharedLocationLabel(clips)}`
+              {m.groupRange(
+                formatDateTime(clips[0].timestamp, locale),
+                formatClock(clips[clips.length - 1].timestamp, locale),
+              )}
+              {sharedLocationLabel(clips, locale)
+                ? ` · ${sharedLocationLabel(clips, locale)}`
                 : ""}
-              {bytes > 0 ? ` · 這群共 ${formatBytes(bytes)}` : ""}
+              {bytes > 0 ? m.groupSize(formatBytes(bytes, locale)) : ""}
             </CardDescription>
           </div>
           <div className="relative z-30 flex gap-2">
@@ -1313,19 +1308,19 @@ function ClusterCard({
               variant="outline"
               onClick={() => onToggleCluster(names, "all")}
             >
-              全保留
+              {m.keepAll}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={() => onToggleCluster(names, "first")}
             >
-              只留第一筆
+              {m.keepOnlyFirst}
             </Button>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          將刪 {selectedInCluster} 筆，保留 {keepCount} 筆
+          {m.willDeleteCount(selectedInCluster, keepCount)}
         </p>
       </CardHeader>
       <CardContent className="pt-3">
@@ -1382,6 +1377,7 @@ function ClipRows({
   onWatch: (clip: Clip) => void;
   thumbRoot: string;
 }) {
+  const { locale, m } = useI18n();
   return (
     <ul className="divide-y">
       {clips.map((clip, index) => {
@@ -1408,27 +1404,29 @@ function ClipRows({
               <span className="min-w-0">
                 <span className="block font-mono text-sm">{clip.name}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {formatDateTime(clip.timestamp)}
-                  {gap !== null ? ` · 距上一筆 ${formatDuration(gap)}` : " · 群組起點"}
+                  {formatDateTime(clip.timestamp, locale)}
+                  {gap !== null
+                    ? m.gapFromPrevious(formatDuration(gap, locale))
+                    : m.groupStart}
                 </span>
                 <ClipLocationLine location={clip.location} />
               </span>
             </label>
             <div className="flex items-center gap-2 pl-7 sm:pl-0">
               {clip.kind !== "SentryClips" ? (
-                <Badge variant="outline">{clipKindLabel(clip.kind)}</Badge>
+                <Badge variant="outline">{clipKindLabel(clip.kind, locale)}</Badge>
               ) : null}
               <Button size="sm" variant="outline" onClick={() => onWatch(clip)}>
                 <Play />
-                觀看
+                {m.watch}
               </Button>
               <Badge variant={checked ? "destructive" : "secondary"}>
-                {checked ? "將刪除" : "保留"}
+                {checked ? m.willDelete : m.keep}
               </Badge>
               <span className="text-xs text-muted-foreground">
                 {clip.fileCount > 0
-                  ? `${clip.fileCount} 個檔 · ${formatBytes(clip.size)}`
-                  : formatBytes(clip.size)}
+                  ? m.fileSummary(clip.fileCount, formatBytes(clip.size, locale))
+                  : formatBytes(clip.size, locale)}
               </span>
             </div>
             </div>
@@ -1440,12 +1438,13 @@ function ClipRows({
 }
 
 function ClipThumb({ root, name }: { root: string; name: string }) {
+  const { m } = useI18n();
   const [failed, setFailed] = useState(false);
   if (!root || failed) return null;
   const params = new URLSearchParams({ root, name });
   return (
     <img
-      alt="哨兵自動截圖"
+      alt={m.thumbAlt}
       src={`/api/clip-thumb?${params.toString()}`}
       className="h-48 w-auto max-w-full self-start rounded-lg"
       onError={() => setFailed(true)}
@@ -1454,13 +1453,14 @@ function ClipThumb({ root, name }: { root: string; name: string }) {
 }
 
 function ClipLocationLine({ location }: { location?: ClipLocation }) {
+  const { m } = useI18n();
   const label = formatClipLocation(location);
   const href = mapsUrl(location);
   if (!label && !href) return null;
   return (
     <span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
       <MapPin className="size-3 shrink-0" />
-      <span>{label || "有座標"}</span>
+      <span>{label || m.hasCoordinates}</span>
       {href ? (
         <a
           href={href}
@@ -1469,7 +1469,7 @@ function ClipLocationLine({ location }: { location?: ClipLocation }) {
           className="underline underline-offset-2 hover:text-foreground"
           onClick={(event) => event.stopPropagation()}
         >
-          地圖
+          {m.map}
         </a>
       ) : null}
     </span>
@@ -1502,9 +1502,10 @@ async function fetchLocalScan(path: string): Promise<{
     root?: string;
     clipRoot?: string;
     error?: string;
+    detail?: string;
   };
   if (!response.ok) {
-    throw new Error(data.error ?? "無法掃描這個路徑");
+    throw new CodedError(data.error ?? "scan_failed", data.detail ?? "");
   }
   return {
     folders: data.folders ?? [],

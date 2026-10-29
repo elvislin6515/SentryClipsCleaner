@@ -18,7 +18,7 @@ export function writeLastLocalPath(path: string) {
   try {
     localStorage.setItem(PATH_KEY, trimmed);
   } catch {
-    // 私人模式或配額不足時略過
+    // Skip when private mode or storage quota blocks localStorage.
   }
 }
 

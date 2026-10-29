@@ -1,25 +1,41 @@
-export const DEFAULT_SENTRY_ROOT =
-  "C:\\Users\\elvis\\OneDrive\\TeslausbCamModelX\\SentryClips";
+import type { Locale } from "../i18n/locale";
+
+export const DEFAULT_SENTRY_ROOT = "";
 
 export function buildPowerShellScript(
   names: string[],
   rootPath = DEFAULT_SENTRY_ROOT,
+  locale: Locale = "en",
 ): string {
   const list = names
     .map((name) => `  "${name.replace(/"/g, '`"')}"`)
     .join("\n");
   const safeRoot = rootPath.replace(/"/g, '`"');
 
+  const zh = locale === "zh-Hant";
+  const title = zh ? "SentryClips 密集事件清理" : "SentryClips Cleaner";
+  const review = zh ? "先確認路徑與清單，再執行。" : "Review the path and the list, then run it.";
+  const rootLabel = zh ? "刪除根目錄" : "Delete root";
+  const missingRoot = zh ? "找不到資料夾" : "Folder not found";
+  const deletedLabel = zh ? "已刪除" : "Deleted";
+  const skippedLabel = zh ? "略過（不存在）" : "Skipped (missing)";
+  const noneDeleted = zh
+    ? `這 $($folders.Count) 個資料夾都不在 $root。路徑指錯了，沒有刪除任何東西。請回網頁重新掃描正確的 SentryClips 後再下載腳本。`
+    : `None of the $($folders.Count) folders are under $root. The path is wrong, so nothing was deleted. Scan the correct SentryClips folder and download the script again.`;
+  const done = zh
+    ? "完成。刪除 $deleted 個，略過 $missing 個。"
+    : "Done. Deleted $deleted, skipped $missing.";
+
   return `# -*- coding: utf-8 -*-
 # UTF-8 with BOM. Windows PowerShell 5.1 and PowerShell 7 both read that encoding.
-# SentryClips 密集事件清理
-# 先確認路徑與清單，再執行。
+# ${title}
+# ${review}
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 $ErrorActionPreference = "Stop"
-# 0x522A,0x9664 is 刪除. Built from code points so this check does not depend on the ANSI code page.
+# 0x522A,0x9664 is the Traditional Chinese word for delete. Built from code points so this check does not depend on the ANSI code page.
 $encodingProbe = "刪除"
 $encodingExpected = -join (0x522A, 0x9664 | ForEach-Object { [char]$_ })
 if ($encodingProbe -ne $encodingExpected) {
@@ -31,9 +47,9 @@ $folders = @(
 ${list}
 )
 
-Write-Host "刪除根目錄：$root"
+Write-Host "${rootLabel}: $root"
 if (-not (Test-Path -LiteralPath $root)) {
-  Write-Error "找不到資料夾：$root"
+  Write-Error "${missingRoot}: $root"
   exit 1
 }
 
@@ -44,19 +60,19 @@ foreach ($name in $folders) {
   if (Test-Path -LiteralPath $path) {
     Remove-Item -LiteralPath $path -Recurse -Force
     $deleted += 1
-    Write-Host "已刪除 $name"
+    Write-Host "${deletedLabel} $name"
   } else {
     $missing += 1
-    Write-Host "略過（不存在） $name"
+    Write-Host "${skippedLabel} $name"
   }
 }
 
 if ($deleted -eq 0) {
-  Write-Error "這 $($folders.Count) 個資料夾都不在 $root。路徑指錯了，沒有刪除任何東西。請回網頁重新掃描正確的 SentryClips 後再下載腳本。"
+  Write-Error "${noneDeleted}"
   exit 1
 }
 
-Write-Host "完成。刪除 $deleted 個，略過 $missing 個。"
+Write-Host "${done}"
 `;
 }
 

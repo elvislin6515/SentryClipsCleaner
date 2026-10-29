@@ -10,6 +10,6 @@ export async function GET(request: Request) {
   try {
     return await openClipThumb(root, name);
   } catch (error) {
-    return Response.json({ error: mediaErrorMessage(error) }, { status: 404 });
+    return Response.json(mediaErrorMessage(error), { status: 404 });
   }
 }

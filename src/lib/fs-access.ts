@@ -6,6 +6,7 @@ import {
   type ClipLocation,
 } from "@/lib/clips";
 import { parseClipEvent, type ClipEventMeta } from "@/lib/clip-videos";
+import { CodedError } from "@/lib/coded-error";
 import {
   loadLastDirectoryHandle,
   saveLastDirectoryHandle,
@@ -72,7 +73,7 @@ export async function pickClipDirectory(): Promise<DirectoryHandleLike> {
     }
   ).showDirectoryPicker;
   if (!picker) {
-    throw new Error("這個瀏覽器不支援直接選資料夾，請改用「掃描本機路徑」或貼上名稱。");
+    throw new CodedError("picker_unsupported");
   }
 
   const last = await loadLastDirectoryHandle();
@@ -433,10 +434,10 @@ export async function readVideoObjectUrl(
   fileName: string,
 ): Promise<string> {
   if (!directory.getFileHandle) {
-    throw new Error("這個瀏覽器讀不到資料夾裡的影片");
+    throw new CodedError("videos_unsupported");
   }
   if (!/^[^\\/]+\.mp4$/i.test(fileName)) {
-    throw new Error("只能播放這個資料夾裡的 mp4");
+    throw new CodedError("mp4_only");
   }
   const handle = await directory.getFileHandle(fileName);
   const file = await handle.getFile();
@@ -453,13 +454,13 @@ export async function deleteClipFolders(
   for (const name of names) {
     const parent = parents.get(name);
     if (!parent) {
-      failed.push({ name, error: "找不到上層資料夾權限" });
+      failed.push({ name, error: "parent_missing" });
       continue;
     }
     try {
       const writable = await ensurePermission(parent, "readwrite");
       if (!writable) {
-        failed.push({ name, error: "瀏覽器未允許寫入這個資料夾" });
+        failed.push({ name, error: "write_denied" });
         continue;
       }
       await parent.removeEntry(name, { recursive: true });
@@ -467,7 +468,7 @@ export async function deleteClipFolders(
     } catch (error) {
       failed.push({
         name,
-        error: error instanceof Error ? error.message : "刪除失敗",
+        error: error instanceof CodedError ? error.message : "delete_failed",
       });
     }
   }

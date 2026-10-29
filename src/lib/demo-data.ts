@@ -72,9 +72,6 @@ const DEMO_EVENTS: Array<{ name: string; mb: number }> = [
   { name: "2026-08-26_21-10-33", mb: 138 },
 ];
 
-export const DEMO_FOLDER_LABEL =
-  "示範資料 · TeslausbCamModelX / SentryClips";
-
 function demoLocation(name: string): ClipLocation {
   if (name.startsWith("2026-08-20_22")) {
     return { street: "七賢二路", lat: 22.6334, lon: 120.296 };
@@ -101,7 +98,7 @@ export function createDemoClips(): Clip[] {
   return DEMO_EVENTS.map(({ name, mb }) => {
     const timestamp = parseClipFolderName(name);
     if (!timestamp) {
-      throw new Error(`示範資料時間戳無法解析：${name}`);
+      throw new Error(`Demo timestamp could not be parsed: ${name}`);
     }
     return {
       id: name,

@@ -3,6 +3,7 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { Readable } from "node:stream";
 
+import { CodedError } from "@/lib/coded-error";
 import { parseClipFolderName } from "@/lib/clips";
 import {
   groupClipVideos,
@@ -57,7 +58,7 @@ export async function openClipThumb(
   const filePath = join(folder, "thumb.png");
   const info = await stat(filePath).catch(() => null);
   if (!info?.isFile()) {
-    return jsonError("這個資料夾沒有截圖", 404);
+    return jsonError("no_thumb", 404);
   }
   const bytes = await readFile(filePath);
   return new Response(new Uint8Array(bytes), {
@@ -76,24 +77,24 @@ export async function openClipVideo(
   rangeHeader: string | null,
 ): Promise<Response> {
   if (!parseClipVideoName(fileName)) {
-    return jsonError("只能播放這個資料夾裡的哨兵 mp4", 400);
+    return jsonError("mp4_only", 400);
   }
   const folder = await resolveClipFolder(root, clipName);
   const filePath = resolve(folder, fileName);
   const rel = relative(folder, filePath);
   if (rel.startsWith("..") || isAbsolute(rel)) {
-    return jsonError("路徑不允許", 400);
+    return jsonError("path_denied", 400);
   }
 
   const info = await stat(filePath).catch(() => null);
   if (!info?.isFile()) {
-    return jsonError("找不到這支影片", 404);
+    return jsonError("video_missing", 404);
   }
   const realFile = await realpath(filePath);
   const realFolder = await realpath(folder);
   const realRel = relative(realFolder, realFile);
   if (realRel.startsWith("..") || isAbsolute(realRel)) {
-    return jsonError("路徑不允許", 400);
+    return jsonError("path_denied", 400);
   }
 
   const size = info.size;
@@ -124,23 +125,23 @@ export async function openClipVideo(
 
 async function resolveClipFolder(root: string, clipName: string): Promise<string> {
   if (!root.trim() || !isAbsolute(root)) {
-    throw new MediaError("請先掃描本機的 SentryClips 路徑");
+    throw new MediaError("root_required");
   }
   if (
     !parseClipFolderName(clipName) ||
     clipName !== clipName.trim() ||
     /[\\/]/.test(clipName)
   ) {
-    throw new MediaError("資料夾名稱不正確");
+    throw new MediaError("bad_clip_name");
   }
   const folder = resolve(root, clipName);
   const rel = relative(resolve(root), folder);
   if (rel.startsWith("..") || isAbsolute(rel)) {
-    throw new MediaError("路徑不允許");
+    throw new MediaError("path_denied");
   }
   const info = await stat(folder).catch(() => null);
   if (!info?.isDirectory()) {
-    throw new MediaError(`找不到資料夾：${clipName}`);
+    throw new MediaError("folder_missing", clipName);
   }
   return folder;
 }
@@ -164,13 +165,18 @@ function parseByteRange(
   return { start, end: Math.min(end, size - 1) };
 }
 
-class MediaError extends Error {}
+class MediaError extends CodedError {}
 
-function jsonError(message: string, status: number): Response {
-  return Response.json({ error: message }, { status });
+function jsonError(code: string, status: number, detail = ""): Response {
+  return Response.json({ error: code, detail }, { status });
 }
 
-export function mediaErrorMessage(error: unknown): string {
-  if (error instanceof MediaError) return error.message;
-  return error instanceof Error ? error.message : "無法讀取影片";
+export function mediaErrorMessage(error: unknown): {
+  error: string;
+  detail: string;
+} {
+  if (error instanceof CodedError) {
+    return { error: error.message, detail: error.detail };
+  }
+  return { error: "read_video_failed", detail: "" };
 }

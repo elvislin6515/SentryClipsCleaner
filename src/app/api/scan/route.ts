@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { CodedError } from "@/lib/coded-error";
 import { scanLocalClipPath } from "@/lib/local-scan";
 
 export const runtime = "nodejs";
@@ -15,7 +16,12 @@ export async function POST(request: Request) {
     const result = await scanLocalClipPath(path);
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "掃描失敗";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof CodedError) {
+      return NextResponse.json(
+        { error: error.message, detail: error.detail },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ error: "scan_failed" }, { status: 400 });
   }
 }

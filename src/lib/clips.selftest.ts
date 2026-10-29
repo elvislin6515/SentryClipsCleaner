@@ -140,11 +140,24 @@ const located = clipsFromNamedFolders([
 ]);
 assert.equal(located[0].location?.street, "沿海路");
 assert.equal(
-  sharedLocationLabel([
-    { ...located[0], location: { street: "沿海路" } },
-    { ...located[0], name: "other", location: { street: "七賢二路" } },
-  ]),
+  sharedLocationLabel(
+    [
+      { ...located[0], location: { street: "沿海路" } },
+      { ...located[0], name: "other", location: { street: "七賢二路" } },
+    ],
+    "zh-Hant",
+  ),
   "多個地點",
+);
+assert.equal(
+  sharedLocationLabel(
+    [
+      { ...located[0], location: { street: "沿海路" } },
+      { ...located[0], name: "other", location: { street: "七賢二路" } },
+    ],
+    "en",
+  ),
+  "Multiple locations",
 );
 
 const home = { street: "七賢二路", lat: 22.6334, lon: 120.296 };
@@ -215,8 +228,10 @@ const eventMeta = parseClipEvent({
 });
 assert.equal(eventMeta?.camera, "right_pillar");
 assert.equal(eventMeta?.lat, 24.8064);
-assert.equal(eventReasonLabel(eventMeta?.reason ?? null), "偵測到物體");
-assert.equal(eventReasonLabel("sentry_locked_handle_pulled"), "拉動門把");
+assert.equal(eventReasonLabel(eventMeta?.reason ?? null, "zh-Hant"), "偵測到物體");
+assert.equal(eventReasonLabel("sentry_locked_handle_pulled", "zh-Hant"), "拉動門把");
+assert.equal(eventReasonLabel(eventMeta?.reason ?? null), "Object detected");
+assert.equal(eventReasonLabel("sentry_locked_handle_pulled"), "Door handle pulled");
 assert.equal(eventCameraId("0"), "front");
 assert.equal(eventCameraId("5"), "left_pillar");
 assert.equal(eventCameraId(7), "back");
@@ -278,7 +293,13 @@ const generated = buildPowerShellScript(
 );
 assert.match(generated, /0x522A, 0x9664/);
 assert.match(generated, /C:\\Users\\使用者\\SentryClips/);
-assert.match(generated, /資料夾`"名稱/);
+assert.match(generated, /Delete root/);
+const generatedZh = buildPowerShellScript(
+  ["2026-09-12_07-57-33"],
+  "C:\\TeslaCam\\SentryClips",
+  "zh-Hant",
+);
+assert.match(generatedZh, /刪除根目錄/);
 const encoded = encodeTextDownload(stamped, generated);
 assert.deepEqual(Array.from(encoded.subarray(0, 3)), [0xef, 0xbb, 0xbf]);
 assert.equal(new TextDecoder().decode(encoded.subarray(3)), generated);

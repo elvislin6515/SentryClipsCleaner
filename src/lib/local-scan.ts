@@ -9,6 +9,7 @@ import {
   type ClipKind,
   type ClipLocation,
 } from "@/lib/clips";
+import { CodedError } from "@/lib/coded-error";
 import { DEFAULT_SENTRY_ROOT } from "@/lib/export-script";
 
 const BUCKETS = new Set<ClipKind>([
@@ -63,7 +64,7 @@ async function measureFolder(
       size += info.size;
       fileCount += 1;
     } catch {
-      // OneDrive 佔位檔若暫時讀不到就略過該檔
+// Skip an OneDrive placeholder when it cannot be read yet.
     }
   }
   return { size, fileCount };
@@ -132,18 +133,18 @@ function clipRootFrom(dirs: string[], fallback: string): string {
 export async function scanLocalClipPath(rawPath: string): Promise<LocalScanResult> {
   const target = rawPath.trim();
   if (!target) {
-    throw new Error("請輸入資料夾路徑");
+    throw new CodedError("path_required");
   }
   if (!isAbsolute(target)) {
-    throw new Error("請輸入完整路徑，例如 C:\\Users\\...\\SentryClips");
+    throw new CodedError("path_absolute");
   }
 
   const info = await stat(target).catch(() => null);
   if (!info) {
-    throw new Error(`找不到資料夾：${target}`);
+    throw new CodedError("folder_missing", target);
   }
   if (!info.isDirectory()) {
-    throw new Error("這不是資料夾");
+    throw new CodedError("not_a_folder");
   }
 
   const rootName = basename(target);
@@ -266,7 +267,7 @@ export function resolveSelectedFolderPath(options: {
 
   const hints: string[] = [];
   if (options.hintPath?.trim()) hints.push(options.hintPath.trim());
-  hints.push(DEFAULT_SENTRY_ROOT);
+  if (DEFAULT_SENTRY_ROOT) hints.push(DEFAULT_SENTRY_ROOT);
   const home = homedir();
   const oneDrive = join(home, "OneDrive");
   if (existsSync(oneDrive)) {

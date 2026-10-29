@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Pause, Play, SkipForward } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/provider";
+import { explain } from "@/i18n/messages";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +38,7 @@ import {
   resolveClipDirectory,
   type DirectoryHandleLike,
 } from "@/lib/fs-access";
+import { CodedError } from "@/lib/coded-error";
 import { cn } from "@/lib/utils";
 
 const CAMERA_LAYOUT: CameraId[] = [
@@ -62,6 +65,7 @@ export function ClipViewer({
   demo,
   onClose,
 }: ClipViewerProps) {
+  const { locale, m } = useI18n();
   const [segments, setSegments] = useState<ClipVideoSegment[]>([]);
   const [segmentId, setSegmentId] = useState<string | null>(null);
   const [mediaDir, setMediaDir] = useState<DirectoryHandleLike | null>(null);
@@ -106,12 +110,12 @@ export function ClipViewer({
       setSegments([]);
       setSegmentId(null);
       setStatus(null);
-      setError("示範資料沒有影片。請掃描本機 SentryClips 後再觀看。");
+      setError(m.viewer.demoNoVideo);
       return;
     }
 
     let cancelled = false;
-    setStatus("正在讀取這個資料夾的鏡頭…");
+    setStatus(m.viewer.readingCameras);
     setError(null);
     void loadSegments(clip.name, root, folder)
       .then((next) => {
@@ -135,7 +139,7 @@ export function ClipViewer({
         }
         setStatus(null);
         if (next.segments.length === 0) {
-          setError("這個資料夾裡沒有可播放的 mp4。");
+          setError(m.viewer.noMp4);
         }
       })
       .catch((err: unknown) => {
@@ -143,12 +147,12 @@ export function ClipViewer({
         setSegments([]);
         setSegmentId(null);
         setStatus(null);
-        setError(err instanceof Error ? err.message : "無法讀取影片");
+        setError(explain(err, m, m.errors.read_video_failed));
       });
     return () => {
       cancelled = true;
     };
-  }, [clip, demo, folder, root]);
+  }, [clip, demo, folder, m, root]);
 
   useEffect(() => {
     if (!clip || !segment || demo) {
@@ -213,7 +217,7 @@ export function ClipViewer({
       return;
     }
 
-    if (Object.keys(keep).length === 0) setStatus("正在開啟影片…");
+    if (Object.keys(keep).length === 0) setStatus(m.viewer.openingVideo);
     else {
       sourcesRef.current = keep;
       setSources(keep);
@@ -248,12 +252,12 @@ export function ClipViewer({
       .catch((err: unknown) => {
         if (cancelled) return;
         setStatus(null);
-        setError(err instanceof Error ? err.message : "無法開啟影片");
+        setError(explain(err, m, m.errors.open_video_failed));
       });
     return () => {
       cancelled = true;
     };
-  }, [allCameras, clip, demo, event?.camera, mediaDir, root, segment]);
+  }, [allCameras, clip, demo, event?.camera, m, mediaDir, root, segment]);
 
   useEffect(() => {
     const pending = pendingSeek.current;
@@ -366,8 +370,8 @@ export function ClipViewer({
   }
 
   const place = clip ? formatClipLocation(clip.location) : "";
-  const reasonLabel = eventReasonLabel(event?.reason ?? null);
-  const triggerLabel = event?.camera ? cameraLabel(event.camera) : "";
+  const reasonLabel = eventReasonLabel(event?.reason ?? null, locale);
+  const triggerLabel = event?.camera ? cameraLabel(event.camera, locale) : "";
   const map =
     event?.lat != null && event.lon != null
       ? mapsUrl({ lat: event.lat, lon: event.lon })
@@ -393,13 +397,11 @@ export function ClipViewer({
           <DialogDescription>
             {place ? `${place} · ` : ""}
             {reasonLabel ? `${reasonLabel} · ` : ""}
-            鏡頭只在這台電腦播放，不會上傳。
+            {m.viewer.localOnly}
             {segment && !allCameras && segment.files.length > 1
-              ? " 先只載入同一側的鏡頭。"
+              ? m.viewer.sameSide
               : ""}
-            {segments.length > 1
-              ? ` 這個資料夾有 ${segments.length} 段。`
-              : ""}
+            {segments.length > 1 ? m.viewer.segmentCount(segments.length) : ""}
           </DialogDescription>
         </DialogHeader>
 
@@ -414,8 +416,8 @@ export function ClipViewer({
         {event && (reasonLabel || triggerLabel || map) ? (
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-40 space-y-1 text-sm">
-              {reasonLabel ? <p>原因：{reasonLabel}</p> : null}
-              {triggerLabel ? <p>觸發鏡頭：{triggerLabel}</p> : null}
+              {reasonLabel ? <p>{m.viewer.reason(reasonLabel)}</p> : null}
+              {triggerLabel ? <p>{m.viewer.trigger(triggerLabel)}</p> : null}
               {map ? (
                 <a
                   className="text-xs text-muted-foreground underline"
@@ -423,13 +425,13 @@ export function ClipViewer({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  在 Google 地圖開啟
+                  {m.viewer.openMaps}
                 </a>
               ) : null}
             </div>
             {event.lat != null && event.lon != null ? (
               <iframe
-                title="事件位置"
+                title={m.viewer.mapTitle}
                 className="h-36 w-56 rounded-lg border border-foreground/10"
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
@@ -454,11 +456,11 @@ export function ClipViewer({
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={() => playAll(true)}>
                 <Play />
-                一起播放
+                {m.viewer.playTogether}
               </Button>
               <Button size="sm" variant="outline" onClick={() => playAll(false)}>
                 <Pause />
-                全部暫停
+                {m.viewer.pauseAll}
               </Button>
               <Button
                 size="sm"
@@ -467,7 +469,7 @@ export function ClipViewer({
                 disabled={!eventJump}
               >
                 <SkipForward />
-                跳到事件
+                {m.viewer.jumpEvent}
                 {eventMs != null ? ` ${formatTeslaClock(eventMs)}` : ""}
               </Button>
               {segment.files.length > 1 ? (
@@ -477,8 +479,8 @@ export function ClipViewer({
                   onClick={() => setAllCameras((current) => !current)}
                 >
                   {allCameras
-                    ? "只留這一側"
-                    : `載入全部鏡頭（${segment.files.length}）`}
+                    ? m.viewer.thisSide
+                    : m.viewer.allCameras(segment.files.length)}
                 </Button>
               ) : null}
             </div>
@@ -500,14 +502,14 @@ export function ClipViewer({
                     >
                       <figcaption className="flex items-center justify-between text-xs text-muted-foreground">
                         <span>
-                          {cameraLabel(file.camera)}
+                          {cameraLabel(file.camera, locale)}
                           {triggered ? (
                             <span className="ml-2 rounded bg-sentry/15 px-1.5 py-0.5 text-sentry">
-                              觸發
+                              {m.viewer.triggered}
                             </span>
                           ) : null}
                         </span>
-                        <span>{file.size ? formatBytes(file.size) : file.name}</span>
+                        <span>{file.size ? formatBytes(file.size, locale) : file.name}</span>
                       </figcaption>
                       {sources[file.camera] ? (
                         <video
@@ -562,6 +564,7 @@ function ClipTimelineBar({
   onScrub: (ratio: number) => void;
   onJumpEvent: () => void;
 }) {
+  const { m } = useI18n();
   const track = useRef<HTMLDivElement>(null);
   const span = Math.max(timeline.endMs - timeline.startMs, 1);
   const playhead =
@@ -581,7 +584,7 @@ function ClipTimelineBar({
         ref={track}
         role="slider"
         tabIndex={0}
-        aria-label="播放時間"
+        aria-label={m.viewer.playback}
         aria-valuemin={0}
         aria-valuemax={Math.round(span / 1000)}
         aria-valuenow={Math.round(playhead * (span / 1000))}
@@ -619,9 +622,9 @@ function ClipTimelineBar({
             className="absolute top-2.5 size-3.5 -translate-x-1/2 rounded-full bg-sentry ring-2 ring-popover"
             style={{ left: `${eventRatio * 100}%` }}
             title={
-              eventMs != null ? `事件 ${formatTeslaClock(eventMs)}` : "事件"
+              eventMs != null ? m.viewer.eventAt(formatTeslaClock(eventMs)) : m.viewer.event
             }
-            aria-label="跳到事件"
+            aria-label={m.viewer.jumpEvent}
             onPointerDown={(node) => node.stopPropagation()}
             onClick={(node) => {
               node.stopPropagation();
@@ -634,7 +637,7 @@ function ClipTimelineBar({
         <span>{formatTeslaClock(timeline.startMs)}</span>
         <span>
           {playheadMs != null ? formatTeslaClock(playheadMs) : ""}
-          {eventMs != null ? ` · 事件 ${formatTeslaClock(eventMs)}` : ""}
+          {eventMs != null ? ` · ${m.viewer.eventAt(formatTeslaClock(eventMs))}` : ""}
         </span>
         <span>{formatTeslaClock(timeline.endMs)}</span>
       </div>
@@ -666,7 +669,7 @@ async function loadSegments(
     }
   }
   if (!root.trim()) {
-    throw new Error("還沒有本機路徑。請先按「掃描本機路徑」，或選擇 SentryClips 資料夾。");
+    throw new CodedError("no_local_root");
   }
   const response = await fetch(
     `/api/clip-files?root=${encodeURIComponent(root)}&name=${encodeURIComponent(clipName)}`,
@@ -675,9 +678,10 @@ async function loadSegments(
     segments?: ClipVideoSegment[];
     event?: ClipEventMeta | null;
     error?: string;
+    detail?: string;
   };
   if (!response.ok) {
-    throw new Error(data.error ?? "無法讀取這個資料夾");
+    throw new CodedError(data.error ?? "read_clip_failed", data.detail ?? "");
   }
   return {
     segments: data.segments ?? [],

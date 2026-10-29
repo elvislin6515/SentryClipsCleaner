@@ -1,3 +1,41 @@
+import type { Locale } from "../i18n/locale";
+
+const DATE_LOCALE: Record<Locale, string> = {
+  en: "en",
+  "zh-Hant": "zh-TW",
+};
+
+const UNITS: Record<
+  Locale,
+  {
+    unknownSize: string;
+    uncategorized: string;
+    multiplePlaces: string;
+    hours: (hours: number, minutes: number) => string;
+    minutesSeconds: (minutes: number, seconds: number) => string;
+    seconds: (seconds: number) => string;
+  }
+> = {
+  en: {
+    unknownSize: "Unknown size",
+    uncategorized: "Uncategorized",
+    multiplePlaces: "Multiple locations",
+    hours: (hours, minutes) => `${hours} h ${minutes} min`,
+    minutesSeconds: (minutes, seconds) =>
+      seconds ? `${minutes} min ${seconds} s` : `${minutes} min`,
+    seconds: (seconds) => `${seconds} s`,
+  },
+  "zh-Hant": {
+    unknownSize: "大小未知",
+    uncategorized: "未分類",
+    multiplePlaces: "多個地點",
+    hours: (hours, minutes) => `${hours} 小時 ${minutes} 分`,
+    minutesSeconds: (minutes, seconds) =>
+      seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分鐘`,
+    seconds: (seconds) => `${seconds} 秒`,
+  },
+};
+
 export type ClipKind = "SentryClips" | "RecentClips" | "SavedClips" | "unknown";
 export type KeepPolicy = "first" | "last" | "middle" | "spaced";
 
@@ -145,14 +183,14 @@ export function mapsUrl(location?: ClipLocation): string | null {
   return `https://www.google.com/maps?q=${location.lat},${location.lon}`;
 }
 
-export function sharedLocationLabel(clips: Clip[]): string {
+export function sharedLocationLabel(clips: Clip[], locale: Locale = "en"): string {
   const labels = [
     ...new Set(
       clips.map((clip) => formatClipLocation(clip.location)).filter(Boolean),
     ),
   ];
   if (labels.length === 1) return labels[0];
-  if (labels.length > 1) return "多個地點";
+  if (labels.length > 1) return UNITS[locale].multiplePlaces;
   return "";
 }
 
@@ -340,8 +378,8 @@ export function suggestedDeleteNames(
   return names;
 }
 
-export function formatDateTime(date: Date): string {
-  return new Intl.DateTimeFormat("zh-TW", {
+export function formatDateTime(date: Date, locale: Locale = "en"): string {
+  return new Intl.DateTimeFormat(DATE_LOCALE[locale], {
     month: "numeric",
     day: "numeric",
     weekday: "short",
@@ -352,8 +390,8 @@ export function formatDateTime(date: Date): string {
   }).format(date);
 }
 
-export function formatClock(date: Date): string {
-  return new Intl.DateTimeFormat("zh-TW", {
+export function formatClock(date: Date, locale: Locale = "en"): string {
+  return new Intl.DateTimeFormat(DATE_LOCALE[locale], {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -361,18 +399,19 @@ export function formatClock(date: Date): string {
   }).format(date);
 }
 
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number, locale: Locale = "en"): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours} 小時 ${minutes} 分`;
-  if (minutes > 0) return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分鐘`;
-  return `${seconds} 秒`;
+  const units = UNITS[locale];
+  if (hours > 0) return units.hours(hours, minutes);
+  if (minutes > 0) return units.minutesSeconds(minutes, seconds);
+  return units.seconds(seconds);
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "大小未知";
+export function formatBytes(bytes: number, locale: Locale = "en"): string {
+  if (bytes <= 0) return UNITS[locale].unknownSize;
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let unit = 0;
@@ -384,18 +423,19 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
-export function formatGapMinutes(seconds: number): string {
-  if (seconds < 60) return `${seconds} 秒`;
+export function formatGapMinutes(seconds: number, locale: Locale = "en"): string {
+  const units = UNITS[locale];
+  if (seconds < 60) return units.seconds(seconds);
   const minutes = Math.floor(seconds / 60);
   const remain = seconds % 60;
-  return remain === 0 ? `${minutes} 分鐘` : `${minutes} 分 ${remain} 秒`;
+  return units.minutesSeconds(minutes, remain);
 }
 
-export function clipKindLabel(kind: ClipKind): string {
+export function clipKindLabel(kind: ClipKind, locale: Locale = "en"): string {
   if (kind === "SentryClips") return "SentryClips";
   if (kind === "RecentClips") return "RecentClips";
   if (kind === "SavedClips") return "SavedClips";
-  return "未分類";
+  return UNITS[locale].uncategorized;
 }
 
 export function summarize(clips: Clip[], selected: Set<string>) {

@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   try {
     return await openClipVideo(root, name, file, request.headers.get("range"));
   } catch (error) {
-    return Response.json({ error: mediaErrorMessage(error) }, { status: 404 });
+    return Response.json(mediaErrorMessage(error), { status: 404 });
   }
 }
